@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Builds
+web/dist/
+**/target/
+*.tsbuildinfo
+
+# Env & secrets (Telegram token lives here)
+.env
+server/.env
+
+# Database + backups (data, not code). SQLite lives in prisma/data; backups
+# are written alongside it (prisma/data/backups).
+server/prisma/data/
+server/data/
+server/backups/
+*.db
+*.db-journal
+*.db.gz
+
+# Prisma generated client
+server/node_modules/.prisma/
+
+# OS / editor
+.DS_Store
+Thumbs.db

@@ -1,0 +1,364 @@
+// Company ERP — SQLite (Prisma). Money/dozen are Float; roles/sections are strings
+// (SQLite has no enums). Switching to PostgreSQL later only changes the datasource.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Employee {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone      String? // optional
+  role       String // cutting | pouch | stretching | pichiru | packing (label only)
+  salaryType String  @default("piece") // piece | shift
+  shiftRate  Float   @default(0) // amount per shift (when salaryType = shift)
+  advance    Float   @default(0) // legacy/opening balance; advances now tracked in EmployeeAdvance
+  active     Boolean @default(true)
+  createdAt  DateTime @default(now())
+
+  cuttingEntries    CuttingEntry[]
+  pouchEntries      PouchEntry[]
+  stretchingEntries StretchingEntry[]
+  pichiruEntries    PichiruEntry[]
+  packingEntries    PackingEntry[]
+  weeklySalaries    WeeklySalary[]
+  advances          EmployeeAdvance[]
+  shiftEntries      ShiftEntry[]
+}
+
+// Weekly shift count for a shift-type employee (fractional shifts allowed).
+model ShiftEntry {
+  id         Int      @id @default(autoincrement())
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  employeeId Int
+  weekStart  String // ISO Monday
+  shifts     Float    @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, weekStart])
+}
+
+// Dated advance credits. Balance = Σ advances − Σ weekly salary advanceDeducted.
+model EmployeeAdvance {
+  id         Int      @id @default(autoincrement())
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  employeeId Int
+  date       String // yyyy-mm-dd
+  amount     Float
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId])
+}
+
+// Cutting fixes the dozen quota for a (cuttingLot, color). All stage entries
+// carry an optional `pieces` (12 pieces = 1 dozen); effective qty = dozen + pieces/12.
+model CuttingEntry {
+  id           Int        @id @default(autoincrement())
+  cuttingLot   CuttingLot @relation(fields: [cuttingLotId], references: [id])
+  cuttingLotId Int
+  color        String
+  dozen        Float
+  pieces       Int?
+  employee     Employee   @relation(fields: [employeeId], references: [id])
+  employeeId   Int
+  date         String // yyyy-mm-dd (business day)
+  createdAt    DateTime   @default(now())
+
+  @@index([cuttingLotId, color])
+  @@index([date])
+}
+
+model PouchEntry {
+  id           Int        @id @default(autoincrement())
+  cuttingLot   CuttingLot @relation(fields: [cuttingLotId], references: [id])
+  cuttingLotId Int
+  color        String
+  dozen        Float
+  pieces       Int?
+  employee     Employee   @relation(fields: [employeeId], references: [id])
+  employeeId   Int
+  date         String
+  createdAt    DateTime   @default(now())
+
+  @@index([cuttingLotId, color])
+  @@index([date])
+}
+
+model StretchingType {
+  id             Int     @id @default(autoincrement())
+  name           String
+  amountPerDozen Float
+  active         Boolean @default(true)
+
+  entries StretchingEntry[]
+  slabs   StretchingPriceSlab[]
+}
+
+// Size-range price slabs for a stretching type. A lot's numeric size falling in
+// [minSize, maxSize] uses pricePerDozen; otherwise StretchingType.amountPerDozen
+// (the "without size" rate) applies. Overlap is prevented in the service layer.
+model StretchingPriceSlab {
+  id               Int            @id @default(autoincrement())
+  stretchingType   StretchingType @relation(fields: [stretchingTypeId], references: [id], onDelete: Cascade)
+  stretchingTypeId Int
+  minSize          Float
+  maxSize          Float
+  pricePerDozen    Float          @default(0)
+
+  @@index([stretchingTypeId])
+}
+
+model StretchingEntry {
+  id               Int            @id @default(autoincrement())
+  cuttingLot       CuttingLot     @relation(fields: [cuttingLotId], references: [id])
+  cuttingLotId     Int
+  color            String
+  stretchingType   StretchingType @relation(fields: [stretchingTypeId], references: [id])
+  stretchingTypeId Int
+  dozen            Float
+  pieces           Int?
+  employee         Employee       @relation(fields: [employeeId], references: [id])
+  employeeId       Int
+  date             String
+  createdAt        DateTime       @default(now())
+
+  @@index([cuttingLotId, color, stretchingTypeId])
+  @@index([date])
+}
+
+// Pichiru (was QC).
+model PichiruEntry {
+  id           Int        @id @default(autoincrement())
+  cuttingLot   CuttingLot @relation(fields: [cuttingLotId], references: [id])
+  cuttingLotId Int
+  color        String
+  dozen        Float
+  pieces       Int?
+  employee     Employee   @relation(fields: [employeeId], references: [id])
+  employeeId   Int
+  date         String
+  createdAt    DateTime   @default(now())
+
+  @@index([cuttingLotId, color])
+  @@index([date])
+}
+
+model PackingEntry {
+  id           Int        @id @default(autoincrement())
+  cuttingLot   CuttingLot @relation(fields: [cuttingLotId], references: [id])
+  cuttingLotId Int
+  color        String
+  dozen        Float
+  pieces       Int?
+  employee     Employee   @relation(fields: [employeeId], references: [id])
+  employeeId   Int
+  date         String
+  createdAt    DateTime   @default(now())
+
+  @@index([cuttingLotId, color])
+  @@index([date])
+}
+
+// Single-row app configuration (id is always 1).
+model Settings {
+  id                   Int    @id @default(1)
+  companyName          String @default("My Company")
+  themeColor           String @default("#4f46e5")
+  cuttingPricePerDozen Float  @default(0)
+  qcPricePerDozen      Float  @default(0)
+  packingPricePerDozen Float  @default(0)
+  adminPin             String @default("1234")
+  telegramBotToken     String @default("") // moved from server/.env (env used as fallback)
+  telegramChatId       String @default("")
+}
+
+/* ------------------------------------------------------------------ *
+ * Masters (Settings) — general categories/sizes/colors
+ * ------------------------------------------------------------------ */
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  sizes         Size[]
+  cuttingLots   CuttingLot[]
+  cuttingPrices CuttingPrice[]
+  pouchPrices   PouchPrice[]
+  diaSizeLinks  DiaSizeLink[]
+}
+
+model Size {
+  id         Int     @id @default(autoincrement())
+  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId Int
+  name       String // e.g. "S", "M", "XL"
+  active     Boolean @default(true)
+
+  cuttingLots   CuttingLot[]
+  cuttingPrices CuttingPrice[]
+  diaSizeLinks  DiaSizeLink[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+}
+
+/**
+ * Settings-managed hint: which (category, size) a free-text dia usually implies.
+ *
+ * Purely ADVISORY — it pre-fills the cutting-lot form and can always be
+ * overridden. Nothing validates against it. `dia` stays a plain string matched
+ * as-is: FabricationRoll.dia and CuttingLot.dia hold real production data and
+ * rip cutting matches dia === "12" literally, so normalising or FK-ing dia
+ * would silently break it.
+ *
+ * A dia is NOT unique to one (category, size): live data has dia "80" spanning
+ * nine pairs across three categories. The unique key therefore blocks only
+ * exact duplicate rows, and the form auto-fills solely when a dia resolves to a
+ * single link.
+ */
+model DiaSizeLink {
+  id         Int      @id @default(autoincrement())
+  dia        String
+  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId Int
+  size       Size     @relation(fields: [sizeId], references: [id])
+  sizeId     Int
+  createdAt  DateTime @default(now())
+
+  @@unique([dia, categoryId, sizeId])
+  @@index([dia])
+  @@index([categoryId])
+  @@index([sizeId])
+}
+
+model Color {
+  id     Int     @id @default(autoincrement())
+  name   String  @unique
+  active Boolean @default(true)
+}
+
+/* ------------------------------------------------------------------ *
+ * Fabrication — top of the lot hierarchy
+ * ------------------------------------------------------------------ */
+
+model FabricationLot {
+  id        Int      @id @default(autoincrement())
+  lotNumber String   @unique
+  // own | job_given_out | job_from_out_own | job_worker_out. Only job_given_out
+  // uses the short flow (cutting → packing, packing capped by cutting).
+  type      String   @default("own")
+  status    String   @default("draft") // draft | dyeing | ready
+  locked    Boolean  @default(false) // orthogonal freeze; set after cutting is done
+  createdAt DateTime @default(now())
+
+  rolls            FabricationRoll[]
+  cuttingLots      CuttingLot[]
+  ripCuttingEntries RipCuttingEntry[]
+
+  @@index([status])
+}
+
+// Rip cutting consumes the dyeing weight of a lot's 12-dia (rip material) rolls.
+// Standalone weight ledger; remaining = Σ(12-dia dyeingWeight) − Σ(entry weight).
+model RipCuttingEntry {
+  id               Int            @id @default(autoincrement())
+  fabricationLot   FabricationLot @relation(fields: [fabricationLotId], references: [id])
+  fabricationLotId Int
+  weight           Float
+  createdAt        DateTime       @default(now())
+
+  @@index([fabricationLotId])
+}
+
+// A roll entry: dia → roll count → weight → texture/pinnal.
+model FabricationRoll {
+  id                Int            @id @default(autoincrement())
+  fabricationLot    FabricationLot @relation(fields: [fabricationLotId], references: [id])
+  fabricationLotId  Int
+  dia               String
+  rollCount         Int // number of rolls
+  weight            Float // greige / initial weight
+  texturePinnal     String // texture / pinnal number
+  fabricationWeight Float? // Stage 1 update
+  dyeingWeight      Float? // Stage 2 (color-dyeing) update
+  createdAt         DateTime       @default(now())
+
+  @@index([fabricationLotId])
+}
+
+/* ------------------------------------------------------------------ *
+ * Cutting lot header — references a ready fabrication lot
+ * ------------------------------------------------------------------ */
+
+model CuttingLot {
+  id               Int            @id @default(autoincrement())
+  cuttingLotNumber String
+  fabricationLot   FabricationLot @relation(fields: [fabricationLotId], references: [id])
+  fabricationLotId Int
+  dia              String // pulled from the fabrication lot's rolls at creation
+  category         Category       @relation(fields: [categoryId], references: [id])
+  categoryId       Int
+  size             Size           @relation(fields: [sizeId], references: [id])
+  sizeId           Int
+  status           String         @default("active") // active | completed
+  createdAt        DateTime       @default(now())
+
+  cuttingEntries    CuttingEntry[]
+  pouchEntries      PouchEntry[]
+  stretchingEntries StretchingEntry[]
+  pichiruEntries    PichiruEntry[]
+  packingEntries    PackingEntry[]
+
+  @@index([fabricationLotId])
+  @@index([status])
+}
+
+/* ------------------------------------------------------------------ *
+ * Pricing — cutting by (category, size); pouch by category
+ * ------------------------------------------------------------------ */
+
+model CuttingPrice {
+  id            Int      @id @default(autoincrement())
+  category      Category @relation(fields: [categoryId], references: [id])
+  categoryId    Int
+  size          Size     @relation(fields: [sizeId], references: [id])
+  sizeId        Int
+  pricePerDozen Float    @default(0)
+
+  @@unique([categoryId, sizeId])
+}
+
+model PouchPrice {
+  id            Int      @id @default(autoincrement())
+  category      Category @relation(fields: [categoryId], references: [id])
+  categoryId    Int      @unique
+  pricePerDozen Float    @default(0)
+}
+
+/* ------------------------------------------------------------------ *
+ * Persisted weekly salary (snapshot + advance deduction)
+ * ------------------------------------------------------------------ */
+
+model WeeklySalary {
+  id              Int      @id @default(autoincrement())
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  employeeId      Int
+  weekStart       String // ISO Monday
+  weekEnd         String // ISO Sunday
+  linesJson       String // serialized SalaryLine[] snapshot (day-wise breakdown + rates)
+  grossTotal      Float
+  advanceDeducted Float    @default(0)
+  netTotal        Float
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([employeeId, weekStart])
+}

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\venka\\\\Documents\\\\company app\" -Force)",
+      "Bash(Select-Object Name, FullName, Mode)",
+      "Bash(dir /s /b)",
+      "PowerShell(head -80)",
+      "Bash(xargs grep -l \"export.*xlsx\\\\|export.*pdf\\\\|whatsapp\\\\|telegram\")"
+    ]
+  }
+}

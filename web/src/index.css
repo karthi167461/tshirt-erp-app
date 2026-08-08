@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 14px;
+
+  --background: #f6f7fb;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --muted: #eef1f6;
+  --muted-foreground: #64748b;
+  --border: #e2e8f0;
+  --input: #94a3b8; /* darker, clearly-visible border for input fields */
+  --destructive: #dc2626;
+
+  /* Overridden at runtime from Settings.themeColor */
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Inter", "Noto Sans Tamil", "Nirmala UI", system-ui, -apple-system,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid var(--background);
+}
+
+@layer utilities {
+  .card-shadow {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04),
+      0 8px 24px -12px rgba(15, 23, 42, 0.12);
+  }
+}
+
+/* --- Barcode label printing -------------------------------------------- *
+ * The label sheet is a real DOM node (#print-sheet) rather than a generated
+ * PDF, so Tamil names print with the browser's font stack. It is hidden on
+ * screen and is the ONLY thing visible on paper.
+ * ----------------------------------------------------------------------- */
+#print-sheet {
+  display: none;
+}
+
+@media print {
+  /* Hide the app, show only the sheet. `visibility` rather than `display` on
+     the ancestors so #print-sheet can still be pulled out of the flow. */
+  body > *:not(#print-sheet) {
+    display: none !important;
+  }
+
+  #print-sheet {
+    display: flex !important;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 4mm;
+    padding: 6mm;
+  }
+
+  .print-label {
+    width: 55mm;
+    padding: 2mm;
+    border: 1px solid #000;
+    border-radius: 1mm;
+    text-align: center;
+    background: #fff;
+    color: #000;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .print-label-title {
+    font-size: 10pt;
+    font-weight: 600;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+
+  .print-label-sub {
+    font-size: 8pt;
+    line-height: 1.2;
+    margin-bottom: 1mm;
+  }
+
+  .print-label svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  @page {
+    margin: 0;
+  }
+}
