@@ -9,12 +9,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  Select,
   Field,
   Input,
   Button,
   Badge,
 } from "@/components/ui";
+import { Combobox } from "@/components/Combobox";
 import { useEmployees, useSalary, useSettings, useWeekSalarySheet } from "@/lib/data";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/notify";
@@ -102,12 +102,15 @@ function SalaryInner() {
           <div className="grid sm:grid-cols-2 gap-4">
             {mode === "one" && (
               <Field label={t("common.employee")}>
-                <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-                  <option value="">{t("salary.selectEmployee")}</option>
-                  {employees?.map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </Select>
+                <Combobox
+                  value={employeeId}
+                  onChange={setEmployeeId}
+                  placeholder={t("salary.selectEmployee")}
+                  options={(employees ?? []).map((emp) => ({
+                    value: String(emp.id),
+                    label: emp.name,
+                  }))}
+                />
               </Field>
             )}
             <Field label={t("salary.week")}>

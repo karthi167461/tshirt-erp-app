@@ -13,6 +13,7 @@ import CuttingLotDetailPage from "@/pages/CuttingLotDetail";
 import CuttingPage from "@/pages/Cutting";
 import PouchPage from "@/pages/Pouch";
 import StretchingPage from "@/pages/Stretching";
+import StretchingFlowsPage from "@/pages/StretchingFlows";
 import PichiruPage from "@/pages/Pichiru";
 import PackingPage from "@/pages/Packing";
 import RipCuttingPage from "@/pages/RipCutting";
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/cutting" element={<CuttingPage />} />
         <Route path="/pouch" element={<PouchPage />} />
         <Route path="/stretching" element={<StretchingPage />} />
+        <Route path="/stretching-flows" element={<StretchingFlowsPage />} />
         <Route path="/pichiru" element={<PichiruPage />} />
         <Route path="/packing" element={<PackingPage />} />
         <Route path="/rip-cutting" element={<RipCuttingPage />} />

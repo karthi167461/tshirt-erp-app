@@ -7,9 +7,11 @@ import {
   type EntryEditInput,
   type QuotaInfo,
   type LotColorQuota,
+  type FlowColorStatus,
 } from "@erp/shared";
 import { prisma } from "../db.js";
 import { ApiException } from "../errors.js";
+import { paginate } from "./pagination.js";
 import {
   assertWithinQuota,
   ceilingForStage,
@@ -18,17 +20,49 @@ import {
   pouchUsedExcluding,
   stretchingUsed,
   stretchingUsedExcluding,
+  stretchingTotalsByType,
+  flowStepCeiling,
   pichiruUsed,
   pichiruUsedExcluding,
   packingUsed,
   packingUsedExcluding,
   effectiveQty,
   round2,
+  type ChainCtx,
+  type FlowInfo,
 } from "./quota.js";
 
 /** Job-work-given-outside lots skip pouch/stretching/kainool (cutting → packing). */
-function isShortFlow(fabricationType: string): boolean {
+export function isShortFlow(fabricationType: string): boolean {
   return (SHORT_FLOW_TYPES as readonly string[]).includes(fabricationType);
+}
+
+/** The lot include every quota decision needs: fabrication type + ordered flow steps. */
+const chainInclude = {
+  fabricationLot: { select: { type: true, locked: true } },
+  stretchingFlow: { include: { steps: { orderBy: { position: "asc" as const } } } },
+} as const;
+
+type ChainLot = {
+  fabricationLot: { type: string };
+  stretchingFlow:
+    | { id: number; skipKainool: boolean; steps: { stretchingTypeId: number; position: number }[] }
+    | null;
+};
+
+/** Chain context for `ceilingForStage`, derived from a lot loaded with `chainInclude`. */
+function lotCtx(lot: ChainLot): ChainCtx {
+  const flow: FlowInfo | null = lot.stretchingFlow
+    ? {
+        id: lot.stretchingFlow.id,
+        skipKainool: lot.stretchingFlow.skipKainool,
+        steps: lot.stretchingFlow.steps.map((s) => ({
+          stretchingTypeId: s.stretchingTypeId,
+          position: s.position,
+        })),
+      }
+    : null;
+  return { shortFlow: isShortFlow(lot.fabricationLot.type), flow };
 }
 
 /** Stage → Prisma delegate name, for the generic list/delete helpers. */
@@ -53,7 +87,7 @@ async function assertEmployee(employeeId: number) {
 async function getEntryCuttingLot(cuttingLotId: number) {
   const lot = await prisma.cuttingLot.findUnique({
     where: { id: cuttingLotId },
-    include: { fabricationLot: true },
+    include: chainInclude,
   });
   if (!lot) throw new ApiException(ErrorCode.CUTTING_LOT_NOT_FOUND, 404);
   if (lot.status === "completed" || lot.fabricationLot.locked) {
@@ -84,7 +118,7 @@ export async function createPouch(input: StageEntryInput) {
   const lot = await getEntryCuttingLot(input.cuttingLotId);
   if (isShortFlow(lot.fabricationLot.type))
     throw new ApiException(ErrorCode.STAGE_NOT_ALLOWED, 400);
-  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "pouch", false);
+  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "pouch", lotCtx(lot));
   const used = await pouchUsed(lot.id, input.color);
   assertWithinQuota(ceiling, used, effectiveQty(input.dozen, input.pieces), emptyCode);
   return prisma.pouchEntry.create({
@@ -99,7 +133,11 @@ export async function createPouch(input: StageEntryInput) {
   });
 }
 
-/** Stretching: each sub-type independently ≤ pouch total (chain: pouch → stretching). */
+/**
+ * Stretching. Flow-less lots: each sub-type independently ≤ pouch total. Lots
+ * with a flow: only the flow's types are accepted, strictly in step order —
+ * step 1 ≤ pouch, step i ≤ step i-1's total (enforced via `flowStepCeiling`).
+ */
 export async function createStretching(input: StretchingEntryInput) {
   await assertEmployee(input.employeeId);
   const lot = await getEntryCuttingLot(input.cuttingLotId);
@@ -111,7 +149,13 @@ export async function createStretching(input: StretchingEntryInput) {
   });
   if (!type) throw new ApiException(ErrorCode.STRETCHING_TYPE_NOT_FOUND, 404);
 
-  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "stretching", false);
+  const { ceiling, emptyCode } = await ceilingForStage(
+    lot.id,
+    input.color,
+    "stretching",
+    lotCtx(lot),
+    input.stretchingTypeId
+  );
   const used = await stretchingUsed(lot.id, input.color, input.stretchingTypeId);
   assertWithinQuota(ceiling, used, effectiveQty(input.dozen, input.pieces), emptyCode);
 
@@ -134,7 +178,10 @@ export async function createPichiru(input: StageEntryInput) {
   const lot = await getEntryCuttingLot(input.cuttingLotId);
   if (isShortFlow(lot.fabricationLot.type))
     throw new ApiException(ErrorCode.STAGE_NOT_ALLOWED, 400);
-  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "pichiru", false);
+  // A flow that skips kainool sends the lot from stretching straight to packing.
+  if (lot.stretchingFlow?.skipKainool)
+    throw new ApiException(ErrorCode.KAINOOL_SKIPPED, 400);
+  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "pichiru", lotCtx(lot));
   const used = await pichiruUsed(lot.id, input.color);
   assertWithinQuota(ceiling, used, effectiveQty(input.dozen, input.pieces), emptyCode);
   return prisma.pichiruEntry.create({
@@ -157,10 +204,9 @@ export async function createPichiru(input: StageEntryInput) {
 export async function createPacking(input: StageEntryInput) {
   await assertEmployee(input.employeeId);
   const lot = await getEntryCuttingLot(input.cuttingLotId);
-  const shortFlow = isShortFlow(lot.fabricationLot.type);
   // `pickCeiling` carries the empty code, so the old explicit NO_PICHIRU_TOTAL
   // pre-check is now redundant — assertWithinQuota raises the identical error.
-  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "packing", shortFlow);
+  const { ceiling, emptyCode } = await ceilingForStage(lot.id, input.color, "packing", lotCtx(lot));
   const used = await packingUsed(lot.id, input.color);
   assertWithinQuota(ceiling, used, effectiveQty(input.dozen, input.pieces), emptyCode);
   return prisma.packingEntry.create({
@@ -195,17 +241,22 @@ export async function quotaInfo(
 ): Promise<QuotaInfo> {
   const lot = await prisma.cuttingLot.findUnique({
     where: { id: cuttingLotId },
-    include: { fabricationLot: { select: { type: true } } },
+    include: chainInclude,
   });
   if (!lot) throw new ApiException(ErrorCode.CUTTING_LOT_NOT_FOUND, 404);
-  const shortFlow = isShortFlow(lot.fabricationLot.type);
 
   if (stage === "stretching" && !stretchingTypeId)
     throw new ApiException(ErrorCode.STRETCHING_TYPE_NOT_FOUND, 400);
 
   // Ceiling follows the sequential chain — see `pickCeiling` in quota.ts, which
   // is the one place the chain is defined for create, edit and this read alike.
-  const { ceiling: quota } = await ceilingForStage(cuttingLotId, color, stage, shortFlow);
+  const { ceiling: quota } = await ceilingForStage(
+    cuttingLotId,
+    color,
+    stage,
+    lotCtx(lot),
+    stretchingTypeId
+  );
   const used =
     stage === "pouch"
       ? await pouchUsed(cuttingLotId, color)
@@ -233,10 +284,10 @@ export async function lotColorQuotas(
 ): Promise<LotColorQuota[]> {
   const lot = await prisma.cuttingLot.findUnique({
     where: { id: cuttingLotId },
-    include: { fabricationLot: { select: { type: true } } },
+    include: chainInclude,
   });
   if (!lot) throw new ApiException(ErrorCode.CUTTING_LOT_NOT_FOUND, 404);
-  const shortFlow = isShortFlow(lot.fabricationLot.type);
+  const ctx = lotCtx(lot);
 
   if (stage === "stretching" && !stretchingTypeId)
     throw new ApiException(ErrorCode.STRETCHING_TYPE_NOT_FOUND, 400);
@@ -249,7 +300,7 @@ export async function lotColorQuotas(
       if (stage === "cutting") {
         return { color, ceiling: null, used: await cuttingQuota(cuttingLotId, color), remaining: null };
       }
-      const { ceiling } = await ceilingForStage(cuttingLotId, color, stage, shortFlow);
+      const { ceiling } = await ceilingForStage(cuttingLotId, color, stage, ctx, stretchingTypeId);
       const used =
         stage === "pouch"
           ? await pouchUsed(cuttingLotId, color)
@@ -263,23 +314,80 @@ export async function lotColorQuotas(
   );
 }
 
+/**
+ * Every colour's standing across every step of the lot's stretching flow — one
+ * request feeds the ordered step picker on the stretching entry screens.
+ * 404s when the lot has no flow (legacy lots use the plain type list instead).
+ */
+export async function lotFlowStatus(cuttingLotId: number): Promise<FlowColorStatus[]> {
+  const lot = await prisma.cuttingLot.findUnique({
+    where: { id: cuttingLotId },
+    include: chainInclude,
+  });
+  if (!lot) throw new ApiException(ErrorCode.CUTTING_LOT_NOT_FOUND, 404);
+  const { flow } = lotCtx(lot);
+  if (!flow) throw new ApiException(ErrorCode.STRETCHING_FLOW_NOT_FOUND, 404);
+
+  const colors = await colorsForCuttingLot(cuttingLotId);
+  return Promise.all(
+    colors.map(async (color): Promise<FlowColorStatus> => {
+      const [pouch, totals] = await Promise.all([
+        pouchUsed(cuttingLotId, color),
+        stretchingTotalsByType(cuttingLotId, color),
+      ]);
+      return {
+        color,
+        pouch,
+        steps: flow.steps.map((s) => {
+          const total = round2(totals.get(s.stretchingTypeId) ?? 0);
+          const { ceiling } = flowStepCeiling(flow, s.stretchingTypeId, pouch, totals);
+          return {
+            typeId: s.stretchingTypeId,
+            position: s.position,
+            total,
+            ceiling,
+            remaining: round2(ceiling - total),
+          };
+        }),
+      };
+    })
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Entry log — list / edit / delete (per stage, per cutting lot)
  * ------------------------------------------------------------------ */
 
-/** All entries for a stage + cutting lot, newest first, with employee (+ type). */
-export function listEntries(stage: StageName, cuttingLotId: number) {
+/** Entries for a stage + cutting lot, newest first, with employee (+ type).
+ *  Paginated, optionally filtered to one employee. */
+export function listEntries(
+  stage: StageName,
+  cuttingLotId: number,
+  opts: { page: number; pageSize: number; employeeId?: number }
+) {
   const model = (prisma as any)[STAGE_MODELS[stage]];
-  return model.findMany({
-    where: { cuttingLotId },
-    include: {
-      employee: { select: { id: true, name: true } },
-      ...(stage === "stretching"
-        ? { stretchingType: { select: { id: true, name: true } } }
-        : {}),
-    },
-    orderBy: [{ date: "desc" }, { id: "desc" }],
-  });
+  const where = {
+    cuttingLotId,
+    ...(opts.employeeId ? { employeeId: opts.employeeId } : {}),
+  };
+  return paginate(
+    opts.page,
+    opts.pageSize,
+    () => model.count({ where }),
+    (skip, take) =>
+      model.findMany({
+        where,
+        include: {
+          employee: { select: { id: true, name: true } },
+          ...(stage === "stretching"
+            ? { stretchingType: { select: { id: true, name: true } } }
+            : {}),
+        },
+        orderBy: [{ date: "desc" }, { id: "desc" }],
+        skip,
+        take,
+      })
+  );
 }
 
 async function getEntryOr404(stage: StageName, id: number): Promise<any> {
@@ -310,13 +418,18 @@ export async function updateEntry(stage: StageName, id: number, input: EntryEdit
   const req = effectiveQty(input.dozen, input.pieces);
   // Same ceiling source as create — only the "used" side differs, since this
   // entry's own quantity must be excluded from the bucket it is being edited in.
+  // Known limitation: editing/deleting a step-i entry does not re-validate later
+  // steps; the min-based `flowStretchCompleted` keeps kainool/packing safe anyway.
   if (stage !== "cutting") {
-    const shortFlow = isShortFlow(cutLot.fabricationLot.type);
+    // The stage no longer applies to this lot's flow — deletes stay allowed for cleanup.
+    if (stage === "pichiru" && cutLot.stretchingFlow?.skipKainool)
+      throw new ApiException(ErrorCode.KAINOOL_SKIPPED, 400);
     const { ceiling, emptyCode } = await ceilingForStage(
       entry.cuttingLotId,
       entry.color,
       stage,
-      shortFlow
+      lotCtx(cutLot),
+      stage === "stretching" ? entry.stretchingTypeId : undefined
     );
     const used =
       stage === "pouch"

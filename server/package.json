@@ -13,6 +13,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "generate": "prisma generate",
     "seed": "tsx src/seed.ts",
+    "purge:lots": "tsx src/scripts/purge-lot-data.ts",
     "test": "vitest run"
   },
   "prisma": {

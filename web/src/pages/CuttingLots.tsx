@@ -22,6 +22,7 @@ import {
   useSizes,
   useCuttingLotsPaged,
   useDiaSizeLinks,
+  useStretchingFlows,
   resolveDia,
 } from "@/lib/data";
 import { api } from "@/lib/api";
@@ -38,18 +39,22 @@ export default function CuttingLotsPage() {
 
   const { data: readyLots } = useReadyFabricationLots();
   const { data: categories } = useCategories(true);
+  const { data: stretchingFlows } = useStretchingFlows(true);
 
   const [cuttingLotNumber, setCuttingLotNumber] = useState("");
   const [fabricationLotId, setFabricationLotId] = useState("");
   const [dia, setDia] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [sizeId, setSizeId] = useState("");
+  const [stretchingFlowId, setStretchingFlowId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const { data: fabLot } = useFabricationLot(
     fabricationLotId ? Number(fabricationLotId) : undefined
   );
   const dias = Array.from(new Set((fabLot?.rolls ?? []).map((r) => r.dia)));
+  // Job-given-out lots never stretch — no flow to pick (the server exempts them too).
+  const shortFlow = fabLot?.type === "job_given_out";
   const { data: sizes } = useSizes(categoryId ? Number(categoryId) : undefined, true);
 
   // --- dia → category/size hints (Settings-managed, always overridable) ---
@@ -115,7 +120,12 @@ export default function CuttingLotsPage() {
   };
 
   const canSave =
-    cuttingLotNumber.trim() && fabricationLotId && dia && categoryId && sizeId;
+    cuttingLotNumber.trim() &&
+    fabricationLotId &&
+    dia &&
+    categoryId &&
+    sizeId &&
+    (shortFlow || stretchingFlowId);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -128,6 +138,7 @@ export default function CuttingLotsPage() {
         dia,
         categoryId: Number(categoryId),
         sizeId: Number(sizeId),
+        ...(shortFlow ? {} : { stretchingFlowId: Number(stretchingFlowId) }),
       });
       toast.success(t("toast.saved"));
       setCuttingLotNumber("");
@@ -235,6 +246,21 @@ export default function CuttingLotsPage() {
                 ))}
               </Select>
             </Field>
+            {!shortFlow && (
+              <Field label={t("cuttingLot.flow")}>
+                <Select
+                  value={stretchingFlowId}
+                  onChange={(e) => setStretchingFlowId(e.target.value)}
+                >
+                  <option value="">{t("cuttingLot.selectFlow")}</option>
+                  {stretchingFlows?.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             {narrowed && (
               <div className="col-span-2 sm:col-span-3 -mt-1">
                 <button

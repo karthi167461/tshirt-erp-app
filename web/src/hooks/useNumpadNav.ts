@@ -47,12 +47,19 @@ export function useNumpadNav(enabled: boolean, handlers: NumpadHandlers) {
         return;
       }
 
+      // Inside an open combobox popup, Enter picks the highlighted option and
+      // * / . must not fire chip actions on the form underneath — the popup
+      // owns those keys until it closes.
+      const inComboboxPopup =
+        target instanceof HTMLElement && !!target.closest("[data-combobox-popup]");
+
       switch (e.code) {
         case NUMPAD.save:
           // The scan box owns Enter — it submits a scan, not the entry form.
           // Without this the capture listener would swallow the key and
           // scanning would silently stop working.
           if (isScanBox(target)) return;
+          if (inComboboxPopup) return;
           // preventDefault matters even outside a form: implicit submission
           // plus our requestSubmit() would post every entry twice.
           e.preventDefault();
@@ -70,11 +77,13 @@ export function useNumpadNav(enabled: boolean, handlers: NumpadHandlers) {
           h.onPrevField();
           return;
         case NUMPAD.nextGroup:
+          if (inComboboxPopup) return;
           e.preventDefault();
           e.stopPropagation();
           h.onNextGroup();
           return;
         case NUMPAD.toggle:
+          if (inComboboxPopup) return;
           // NumLock-off this key is Delete — preventDefault keeps it from
           // eating a character in whatever field happens to have focus.
           e.preventDefault();

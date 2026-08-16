@@ -26,6 +26,7 @@ import {
   useFabricationLot,
   useLotColorQuotas,
   useDiaSizeLinks,
+  useStretchingFlows,
   useInvalidateEntries,
   resolveDia,
 } from "@/lib/data";
@@ -34,6 +35,8 @@ import { toastError } from "@/lib/notify";
 import { todayIso, fmtQty, blockDecimal, clampPieces } from "@/lib/utils";
 import { PageTitle } from "@/pages/_parts";
 import { EntryLog } from "@/components/EntryLog";
+import { Combobox } from "@/components/Combobox";
+import { FlowStepPicker } from "@/components/FlowStepPicker";
 import { useNumpadNav } from "@/hooks/useNumpadNav";
 import { useBarcodeScanner, type ScanHit } from "@/hooks/useBarcodeScanner";
 import { NUMPAD } from "@/lib/keyboard";
@@ -324,12 +327,14 @@ function LotCreatePanel({
   const { data: readyLots } = useReadyFabricationLots();
   const { data: categories } = useCategories(true);
   const { data: diaLinks } = useDiaSizeLinks();
+  const { data: stretchingFlows } = useStretchingFlows(true);
 
   const [cuttingLotNumber, setCuttingLotNumber] = useState("");
   const [fabricationLotId, setFabricationLotId] = useState("");
   const [dia, setDia] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [sizeId, setSizeId] = useState("");
+  const [stretchingFlowId, setStretchingFlowId] = useState("");
   const [autoFilled, setAutoFilled] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -337,6 +342,8 @@ function LotCreatePanel({
   const { data: fabLot } = useFabricationLot(fabricationLotId ? Number(fabricationLotId) : undefined);
   const dias = Array.from(new Set((fabLot?.rolls ?? []).map((r) => r.dia)));
   const { data: sizes } = useSizes(categoryId ? Number(categoryId) : undefined, true);
+  // Job-given-out lots never stretch — no flow to pick (the server exempts them too).
+  const shortFlow = fabLot?.type === "job_given_out";
 
   const resolved = resolveDia(diaLinks, dia);
   const narrowed = resolved.matches.length > 0;
@@ -369,7 +376,14 @@ function LotCreatePanel({
       ? sizes?.filter((s) => linkedSizeIds.includes(s.id))
       : sizes;
 
-  const canSave = !!(cuttingLotNumber.trim() && fabricationLotId && dia && categoryId && sizeId);
+  const canSave = !!(
+    cuttingLotNumber.trim() &&
+    fabricationLotId &&
+    dia &&
+    categoryId &&
+    sizeId &&
+    (shortFlow || stretchingFlowId)
+  );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -382,6 +396,7 @@ function LotCreatePanel({
         dia,
         categoryId: Number(categoryId),
         sizeId: Number(sizeId),
+        ...(shortFlow ? {} : { stretchingFlowId: Number(stretchingFlowId) }),
       });
       toast.success(t("toast.saved"));
       setCuttingLotNumber("");
@@ -432,6 +447,14 @@ function LotCreatePanel({
               {sizeOptions?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
+          {!shortFlow && (
+            <Field label={t("cuttingLot.flow")}>
+              <Select data-ring value={stretchingFlowId} onChange={(e) => setStretchingFlowId(e.target.value)}>
+                <option value="">{t("cuttingLot.selectFlow")}</option>
+                {stretchingFlows?.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </Select>
+            </Field>
+          )}
           {narrowed && (
             <div className="col-span-2 sm:col-span-3 -mt-1">
               <button
@@ -565,10 +588,18 @@ function EntryPanel({
   const { data: employees } = useEmployees(true);
   const { data: lots } = useActiveCuttingLots();
   const { data: types } = useStretchingTypes(true);
+  // All flows (not just active): a lot keeps its flow even after deactivation.
+  const { data: flows } = useStretchingFlows();
 
   const isCutting = stage === "cutting";
   const needsType = stage === "stretching";
   const lotId = cuttingLotId ? Number(cuttingLotId) : undefined;
+  const selectedLot = lots?.find((l) => l.id === lotId);
+  // A lot created with a stretching flow lists ONLY the flow's steps, in order.
+  const lotFlow =
+    needsType && selectedLot?.stretchingFlowId
+      ? flows?.find((f) => f.id === selectedLot.stretchingFlowId)
+      : undefined;
 
   // Cutting ESTABLISHES the quota, so it picks from the master colour list;
   // downstream stages may only use colours the lot was actually cut in.
@@ -640,22 +671,46 @@ function EntryPanel({
         <CardContent>
           <form ref={formRef} onSubmit={submit} className="space-y-4">
             <Field label={t("cuttingLot.number")}>
-              <Select data-ring value={cuttingLotId} onChange={(e) => onCuttingLot(e.target.value)}>
-                <option value="">{t("cuttingLot.select")}</option>
-                {visibleLots?.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.cuttingLotNumber} · {l.fabricationLot.lotNumber} · {l.category.name}/{l.size.name}
-                  </option>
-                ))}
-              </Select>
+              <Combobox
+                data-ring
+                value={cuttingLotId}
+                onChange={onCuttingLot}
+                placeholder={t("cuttingLot.select")}
+                options={(visibleLots ?? []).map((l) => ({
+                  value: String(l.id),
+                  label: `${l.cuttingLotNumber} · ${l.fabricationLot.lotNumber} · ${l.category.name}/${l.size.name}`,
+                  keywords: encodeBarcode("cuttingLot", l.id),
+                }))}
+              />
             </Field>
 
             {needsType && (
-              <Field label={t("nav.stretching")}>
-                <Select data-ring value={draft.stretchingTypeId} onChange={(e) => onDraft({ stretchingTypeId: e.target.value })}>
-                  <option value="">{t("form.selectType")}</option>
-                  {types?.map((ty) => <option key={ty.id} value={ty.id}>{ty.name}</option>)}
-                </Select>
+              <Field label={lotFlow ? t("form.flowSteps") : t("nav.stretching")}>
+                {lotFlow ? (
+                  <FlowStepPicker
+                    ring
+                    cuttingLotId={lotId}
+                    steps={lotFlow.steps.map((s) => ({
+                      typeId: s.stretchingTypeId,
+                      position: s.position,
+                      name: s.stretchingType.name,
+                    }))}
+                    value={draft.stretchingTypeId}
+                    onChange={(v) => onDraft({ stretchingTypeId: v })}
+                  />
+                ) : (
+                  <Combobox
+                    data-ring
+                    value={draft.stretchingTypeId}
+                    onChange={(v) => onDraft({ stretchingTypeId: v })}
+                    placeholder={t("form.selectType")}
+                    options={(types ?? []).map((ty) => ({
+                      value: String(ty.id),
+                      label: ty.name,
+                      keywords: encodeBarcode("stretchingType", ty.id),
+                    }))}
+                  />
+                )}
               </Field>
             )}
 
@@ -666,6 +721,7 @@ function EntryPanel({
                 onChange={(colors) => onDraft({ colors })}
                 disabled={!lotId}
                 emptyLabel={lotId ? t("form.noColors") : t("form.selectColor")}
+                selectAllLabel={t("form.allColors")}
               />
             </Field>
 
@@ -719,14 +775,16 @@ function EntryPanel({
             </div>
 
             <Field label={t("common.employee")}>
-              <Select data-ring value={employeeId} onChange={(e) => onEmployee(e.target.value)}>
-                <option value="">{t("form.selectEmployee")}</option>
-                {employees?.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name} · {encodeBarcode("employee", emp.id)}
-                  </option>
-                ))}
-              </Select>
+              <Combobox
+                data-ring
+                value={employeeId}
+                onChange={onEmployee}
+                placeholder={t("form.selectEmployee")}
+                options={(employees ?? []).map((emp) => ({
+                  value: String(emp.id),
+                  label: `${emp.name} · ${encodeBarcode("employee", emp.id)}`,
+                }))}
+              />
             </Field>
 
             <Button data-ring type="submit" className="w-full" disabled={!canSave || saving}>

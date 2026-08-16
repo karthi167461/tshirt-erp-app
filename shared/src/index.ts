@@ -73,6 +73,12 @@ export const ErrorCode = {
   RIP_EXCEEDED: "error.rip_exceeded",
   // Stretching size-range slabs
   SLAB_OVERLAP: "error.slab_overlap",
+  // Stretching flows (ordered step chain)
+  KAINOOL_SKIPPED: "error.kainool_skipped",
+  STRETCHING_FLOW_NOT_FOUND: "error.stretching_flow_not_found",
+  FLOW_REQUIRED: "error.flow_required",
+  FLOW_STEP_NOT_ALLOWED: "error.flow_step_not_allowed",
+  NO_PREV_STEP_TOTAL: "error.no_prev_step_total",
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
@@ -272,6 +278,24 @@ export const stretchingSlabsInput = z
 export type StretchingSlabsInput = z.infer<typeof stretchingSlabsInput>;
 
 /* ------------------------------------------------------------------ *
+ * Stretching flows — an ordered sequence of stretching types
+ * ------------------------------------------------------------------ */
+
+export const stretchingFlowInput = z.object({
+  name: z.string().trim().min(1).max(80),
+  /** After the last step the lot skips kainool and packs against stretching. */
+  skipKainool: z.boolean().default(false),
+  active: z.boolean().default(true),
+  /** Ordered stretchingTypeIds; index i becomes position i+1. No repeats. */
+  steps: z
+    .array(id)
+    .min(1)
+    .max(20)
+    .refine((a) => new Set(a).size === a.length, { message: ErrorCode.VALIDATION }),
+});
+export type StretchingFlowInput = z.infer<typeof stretchingFlowInput>;
+
+/* ------------------------------------------------------------------ *
  * Settings (single row)
  * ------------------------------------------------------------------ */
 
@@ -307,6 +331,8 @@ export const cuttingLotInput = z.object({
   dia: z.string().trim().min(1).max(40),
   categoryId: id,
   sizeId: id,
+  /** Optional here; the service requires it for full-flow lots (short-flow lots never stretch). */
+  stretchingFlowId: id.optional(),
 });
 export type CuttingLotInput = z.infer<typeof cuttingLotInput>;
 
@@ -430,6 +456,22 @@ export interface StageCeiling {
   emptyCode: string;
 }
 
+/**
+ * One colour's standing across every step of the lot's stretching flow —
+ * feeds the ordered step picker on the stretching entry screens.
+ */
+export interface FlowColorStatus {
+  color: string;
+  pouch: number;
+  steps: {
+    typeId: number;
+    position: number;
+    total: number;
+    ceiling: number;
+    remaining: number;
+  }[];
+}
+
 /* --- Barcodes ------------------------------------------------------------ *
  * Codes are DERIVED from the row id, not stored: none of these tables carries a
  * unique human key that is safe to encode (cuttingLotNumber's unique index was
@@ -508,6 +550,8 @@ export interface StretchingProgress extends StageProgress {
   typeName: string;
   /** False for master types never applied to this lot — they never block completion. */
   used: boolean;
+  /** 1-based position when the lot has a stretching flow; absent on legacy lots. */
+  stepOrder?: number;
 }
 
 /** Σ over every colour of a cutting lot, in dozen-equivalents. */
@@ -529,6 +573,15 @@ export interface LotAnalytics {
   colors: ColorAnalytics[];
   /** Job-work-given-outside: pouch/stretching/kainool never apply. */
   shortFlow: boolean;
+  /** The lot's stretching flow, when assigned (null on legacy/short-flow lots). */
+  flow: {
+    id: number;
+    name: string;
+    skipKainool: boolean;
+    steps: { typeId: number; typeName: string; position: number }[];
+  } | null;
+  /** flow.skipKainool, hoisted for the client. */
+  kainoolSkipped: boolean;
   totals: LotTotals;
 }
 export interface ColorAnalytics {
@@ -543,8 +596,53 @@ export interface ColorAnalytics {
   /** Kainool's ceiling: min across the stretching types actually used. */
   stretchCompleted: number;
   shortFlow: boolean;
+  /** The lot's flow skips kainool — the stage never applies to this colour. */
+  kainoolSkipped: boolean;
   /** Every stage that applies to this lot has caught up with its own ceiling. */
   allStagesComplete: boolean;
+}
+
+/** One cutting lot's rollup inside the fabrication analytics drill-down. */
+export interface FabricationCuttingLotSummary {
+  id: number;
+  cuttingLotNumber: string;
+  dia: string;
+  categoryName: string;
+  sizeName: string;
+  status: string; // active | completed
+  stretchingFlowName: string | null;
+  /** Σ cutting entries across all colours, dozen-equivalent. */
+  cut: number;
+  /** Σ packing entries across all colours, dozen-equivalent. */
+  packed: number;
+}
+
+/** Fabrication-level analytics: the lot, its rolls, and per-cutting-lot rollups. */
+export interface FabricationAnalytics {
+  id: number;
+  lotNumber: string;
+  type: FabricationType;
+  status: string; // draft | dyeing | ready
+  locked: boolean;
+  createdAt: string; // ISO
+  /** type ∈ SHORT_FLOW_TYPES, hoisted for the client. */
+  shortFlow: boolean;
+  rolls: {
+    id: number;
+    dia: string;
+    rollCount: number;
+    weight: number;
+    texturePinnal: string;
+    fabricationWeight: number | null;
+    dyeingWeight: number | null;
+  }[];
+  totals: {
+    rollCount: number;
+    greigeWeight: number;
+    fabricationWeight: number;
+    dyeingWeight: number;
+  };
+  cuttingLots: FabricationCuttingLotSummary[];
 }
 
 /** Weekly salary breakdown for one employee (day-wise, per rate bucket). */

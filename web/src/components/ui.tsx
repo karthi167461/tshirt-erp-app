@@ -88,6 +88,7 @@ export function MultiSelectChips({
   disabled = false,
   emptyLabel,
   chipRef,
+  selectAllLabel,
 }: {
   options: string[];
   selected: string[];
@@ -96,6 +97,8 @@ export function MultiSelectChips({
   emptyLabel?: string;
   /** Lets a keyboard-driven parent splice the chips into its own focus ring. */
   chipRef?: (el: HTMLButtonElement | null, index: number) => void;
+  /** When set, renders a trailing chip that selects every option (or clears all). */
+  selectAllLabel?: string;
 }) {
   if (disabled || options.length === 0) {
     return <p className="text-sm text-muted-foreground">{emptyLabel}</p>;
@@ -106,6 +109,11 @@ export function MultiSelectChips({
         ? selected.filter((s) => s !== opt)
         : [...selected, opt]
     );
+
+  const allOn = options.every((o) => selected.includes(o));
+  // The select-all chip sits LAST so the colour chips keep indexes 0..n-1
+  // (chipRef contracts and the roving index stay unchanged).
+  const total = options.length + (selectAllLabel ? 1 : 0);
 
   // Roving tabindex: the group is ONE tab stop and arrows move within it, so a
   // lot with a dozen colours doesn't bury the rest of the form in the tab order.
@@ -118,9 +126,9 @@ export function MultiSelectChips({
           ? -1
           : 0;
     let next = -1;
-    if (delta) next = (index + delta + options.length) % options.length;
+    if (delta) next = (index + delta + total) % total;
     else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = options.length - 1;
+    else if (e.key === "End") next = total - 1;
     if (next < 0) return;
     e.preventDefault();
     const group = e.currentTarget.parentElement;
@@ -151,6 +159,23 @@ export function MultiSelectChips({
           </button>
         );
       })}
+      {selectAllLabel && (
+        <button
+          type="button"
+          aria-pressed={allOn}
+          tabIndex={-1}
+          onKeyDown={(e) => onKeyDown(e, options.length)}
+          onClick={() => onChange(allOn ? [] : [...options])}
+          className={cn(
+            "inline-flex items-center rounded-full border border-dashed px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+            allOn
+              ? "border-primary bg-primary text-primary-foreground shadow-sm"
+              : "border-input bg-card text-muted-foreground hover:bg-muted"
+          )}
+        >
+          {selectAllLabel}
+        </button>
+      )}
     </div>
   );
 }

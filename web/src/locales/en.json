@@ -4,6 +4,7 @@
     "tagline": "Cutting · Stretching · QC · Packing"
   },
   "nav": {
+    "menu": "Menu",
     "home": "Home",
     "fabrication": "Fabrication",
     "cuttingLots": "Cutting lots",
@@ -11,6 +12,7 @@
     "cutting": "Cutting",
     "pouch": "Pouch",
     "stretching": "Stretching",
+    "stretchingFlows": "Stretching flows",
     "qc": "QC",
     "pichiru": "Kainool",
     "packing": "Packing",
@@ -214,6 +216,8 @@
     "diaShowLinked": "Show only this dia's links",
     "selectCategory": "Select category",
     "selectSize": "Select size",
+    "flow": "Stretching flow",
+    "selectFlow": "Select stretching flow",
     "create": "Create lot",
     "list": "Cutting lots",
     "search": "Search cutting or fabrication lot",
@@ -232,9 +236,37 @@
   "cutting": {
     "entryHint": "Records cutting work and sets the quota for this lot & color."
   },
+  "flows": {
+    "title": "Stretching flows",
+    "subtitle": "Ordered stretching steps a lot passes through. Each step can only do what the previous step has finished.",
+    "new": "New flow",
+    "name": "Flow name",
+    "skipKainool": "Skip kainool stage",
+    "skipKainoolHint": "After the last stretching step the lot goes straight to packing (packing is limited by completed stretching).",
+    "withKainool": "Kainool after stretching",
+    "steps": "Steps (in order)",
+    "step": "Step {{n}}",
+    "addStep": "Add step",
+    "selectType": "Select stretching type",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "removeStep": "Remove",
+    "noSteps": "Add at least one step",
+    "noFlows": "No flows yet",
+    "usedByLots": "{{count}} lots",
+    "create": "Create flow",
+    "saveChanges": "Save flow",
+    "editing": "Editing {{name}}",
+    "cancelEdit": "Cancel",
+    "saved": "Flow saved",
+    "deleted": "Flow deleted",
+    "list": "Flows",
+    "firstStepHint": "Step 1 is limited by pouch; every later step by the step before it."
+  },
   "entryLog": {
     "title": "Entries",
-    "empty": "No entries yet"
+    "empty": "No entries yet",
+    "allEmployees": "All employees"
   },
   "common": {
     "save": "Save",
@@ -253,6 +285,7 @@
     "dozen": "Dozen",
     "pieces": "Pieces",
     "dzPcs": "{{dz}} dz {{pcs}} pcs",
+    "dzOnly": "{{dz}} dz",
     "employee": "Employee",
     "date": "Date",
     "amount": "Amount",
@@ -274,6 +307,10 @@
     "yes": "Yes",
     "no": "No"
   },
+  "combobox": {
+    "search": "Type to filter…",
+    "noResults": "No matches"
+  },
   "home": {
     "welcome": "Welcome",
     "quickEntry": "Quick entry",
@@ -284,9 +321,14 @@
     "selectLot": "Select or type a lot number",
     "selectColor": "Select color",
     "selectColors": "Tap one or more colors",
+    "allColors": "All colors",
     "noColors": "No colors available for this lot",
     "selectEmployee": "Select employee",
     "selectType": "Select stretching type",
+    "flowSteps": "Flow steps (in order)",
+    "stepNotStarted": "Not started",
+    "stepDone": "Done",
+    "stepBlocked": "Waiting for the previous step",
     "enterDozen": "Enter dozen",
     "newLotHint": "New lot numbers are created automatically at cutting.",
     "remainingHint": "Remaining for this lot & color: {{remaining}}"
@@ -307,8 +349,19 @@
     "allStagesComplete": "All stages complete",
     "stageComplete": "Stage complete",
     "shortFlowHint": "Job work given outside — only cutting and packing apply.",
+    "kainoolSkippedHint": "This lot's flow skips kainool — packing follows stretching directly.",
     "typeNotUsed": "Not used for this lot",
-    "limitLabel": "limit"
+    "limitLabel": "limit",
+    "searchFabLot": "Search fabrication lot",
+    "selectFabLotHint": "Search and select a fabrication lot to view its cutting lots",
+    "changeLot": "Change lot",
+    "greigeWeight": "Greige weight",
+    "noCuttingLots": "No cutting lots yet for this fabrication lot",
+    "tapLotHint": "Tap a cutting lot to view its full progress",
+    "cut": "Cut",
+    "packed": "Packed",
+    "cutVsPacked": "Cut vs packed by cutting lot",
+    "stageTotals": "Stage totals (dozen)"
   },
   "salary": {
     "title": "Weekly salary",
@@ -422,6 +475,11 @@
     "no_rip_material": "No 12-dia dyeing weight on this lot yet",
     "rip_exceeded": "Exceeds remaining rip material. Only {{remaining}} left.",
     "slab_overlap": "Size ranges must not overlap",
+    "kainool_skipped": "This lot's stretching flow skips kainool — pack directly after stretching",
+    "stretching_flow_not_found": "Stretching flow not found",
+    "flow_required": "Select a stretching flow for this lot",
+    "flow_step_not_allowed": "This stretching type is not a step of this lot's flow",
+    "no_prev_step_total": "The previous step has nothing entered yet. Finish it first.",
     "entry_not_found": "Entry not found",
     "advance_exceeded": "Deduction exceeds the available advance",
     "in_use": "Can't delete — it's still linked to existing records",

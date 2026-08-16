@@ -10,10 +10,10 @@ import {
   CardTitle,
   Field,
   Input,
-  Select,
   Button,
   Badge,
 } from "@/components/ui";
+import { Combobox } from "@/components/Combobox";
 import { useRipLots, useRipInfo } from "@/lib/data";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/notify";
@@ -75,15 +75,15 @@ export default function RipCuttingPage() {
         <CardContent>
           <form onSubmit={submit} className="space-y-4">
             <Field label={t("ripCutting.lot")}>
-              <Select value={lotId} onChange={(e) => setLotId(e.target.value)}>
-                <option value="">{t("ripCutting.selectLot")}</option>
-                {lots?.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.lotNumber}
-                    {l.type !== "own" ? ` · ${t(`fabType.${l.type}`)}` : ""}
-                  </option>
-                ))}
-              </Select>
+              <Combobox
+                value={lotId}
+                onChange={setLotId}
+                placeholder={t("ripCutting.selectLot")}
+                options={(lots ?? []).map((l) => ({
+                  value: String(l.id),
+                  label: `${l.lotNumber}${l.type !== "own" ? ` · ${t(`fabType.${l.type}`)}` : ""}`,
+                }))}
+              />
               {lots && !lots.length && (
                 <p className="text-xs text-muted-foreground mt-1">{t("ripCutting.noLots")}</p>
               )}

@@ -29,6 +29,7 @@ import {
   fabricationTypeInput,
   fabricationRenameInput,
   ripCuttingInput,
+  stretchingFlowInput,
   ErrorCode,
 } from "@erp/shared";
 import { prisma, getSettings } from "./db.js";
@@ -43,12 +44,24 @@ import {
   colorsForCuttingLot,
   quotaInfo,
   lotColorQuotas,
+  lotFlowStatus,
   listEntries,
   updateEntry,
   deleteEntry,
   type StageName,
 } from "./services/entries.js";
-import { cuttingLotAnalytics, listCuttingLots, weekAnalytics } from "./services/analytics.js";
+import {
+  listStretchingFlows,
+  createStretchingFlow,
+  updateStretchingFlow,
+  deleteStretchingFlow,
+} from "./services/stretchingFlows.js";
+import {
+  cuttingLotAnalytics,
+  fabricationLotAnalytics,
+  listCuttingLots,
+  weekAnalytics,
+} from "./services/analytics.js";
 import { weeklySalary, saveSalary, weekSalarySheet } from "./services/salary.js";
 import {
   listCuttingPrices,
@@ -214,6 +227,35 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.delete("/api/stretching-types/:id", async (req) =>
     deleteStretchingType(Number((req.params as any).id))
+  );
+
+  /* ---------------- Stretching flows (ordered step chains) ---------------- */
+  app.get("/api/stretching-flows", async (req) => {
+    const activeOnly = (req.query as any)?.active === "1";
+    return listStretchingFlows(activeOnly);
+  });
+
+  // Registered before the param-less CRUD so it can't be shadowed by /:id.
+  app.get("/api/stretching-flows/status", async (req) => {
+    const cuttingLotId = Number((req.query as any)?.cuttingLotId);
+    if (!cuttingLotId) throw new ApiException(ErrorCode.CUTTING_LOT_NOT_FOUND, 400);
+    return lotFlowStatus(cuttingLotId);
+  });
+
+  app.post("/api/stretching-flows", async (req, reply) => {
+    const body = parse(stretchingFlowInput, req.body);
+    reply.code(201);
+    return createStretchingFlow(body);
+  });
+
+  app.put("/api/stretching-flows/:id", async (req) => {
+    const id = Number((req.params as any).id);
+    const body = parse(stretchingFlowInput.partial(), req.body);
+    return updateStretchingFlow(id, body);
+  });
+
+  app.delete("/api/stretching-flows/:id", async (req) =>
+    deleteStretchingFlow(Number((req.params as any).id))
   );
 
   /* ---------------- Masters: categories / sizes / colors ---------------- */
@@ -432,9 +474,12 @@ export async function registerRoutes(app: FastifyInstance) {
   const STAGES: StageName[] = ["cutting", "pouch", "stretching", "pichiru", "packing"];
   for (const stage of STAGES) {
     app.get(`/api/${stage}`, async (req) => {
-      const cuttingLotId = Number((req.query as any)?.cuttingLotId);
-      if (!cuttingLotId) return [];
-      return listEntries(stage, cuttingLotId);
+      const q = req.query as any;
+      const cuttingLotId = Number(q?.cuttingLotId);
+      if (!cuttingLotId) return { items: [], total: 0, page: 1, pageSize: 20 };
+      const { page, pageSize } = parsePageParams(q);
+      const employeeId = q?.employeeId ? Number(q.employeeId) : undefined;
+      return listEntries(stage, cuttingLotId, { page, pageSize, employeeId });
     });
     app.put(`/api/${stage}/:id`, async (req) => {
       const id = Number((req.params as any).id);
@@ -467,6 +512,10 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/cutting-lots-analytics", async () => listCuttingLots());
   app.get("/api/analytics/cutting-lot/:id", async (req) => {
     return cuttingLotAnalytics(Number((req.params as any).id));
+  });
+  // Fabrication drill-down: the lot, its rolls, and per-cutting-lot rollups.
+  app.get("/api/analytics/fabrication-lot/:id", async (req) => {
+    return fabricationLotAnalytics(Number((req.params as any).id));
   });
 
   app.get("/api/analytics/week", async (req) => {

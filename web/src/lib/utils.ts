@@ -52,6 +52,14 @@ export function fmtQty(t: (k: string, o?: any) => string, qty: number): string {
   return t("common.dzPcs", { dz: dozens, pcs: pieces });
 }
 
+/** Like fmtQty but omits a zero pieces part — for tight spots (chart labels). */
+export function fmtQtyCompact(t: (k: string, o?: any) => string, qty: number): string {
+  const { dozens, pieces } = splitDozenPieces(qty);
+  return pieces > 0
+    ? t("common.dzPcs", { dz: dozens, pcs: pieces })
+    : t("common.dzOnly", { dz: dozens });
+}
+
 /** Split a dozen quantity (e.g. 5.5) into whole dozens + remaining pieces (12/dozen). */
 export function splitDozenPieces(qty: number): { dozens: number; pieces: number } {
   const safe = Math.max(0, qty);

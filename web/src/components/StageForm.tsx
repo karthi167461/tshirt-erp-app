@@ -8,7 +8,6 @@ import {
   CardTitle,
   Field,
   Input,
-  Select,
   Button,
   Badge,
   MultiSelectChips,
@@ -18,6 +17,7 @@ import {
   useActiveCuttingLots,
   useCuttingLotColors,
   useStretchingTypes,
+  useStretchingFlows,
   useQuotaInfo,
   useInvalidateEntries,
 } from "@/lib/data";
@@ -25,6 +25,8 @@ import { api } from "@/lib/api";
 import { toastError } from "@/lib/notify";
 import { todayIso, fmtQty, blockDecimal, clampPieces } from "@/lib/utils";
 import { EntryLog } from "@/components/EntryLog";
+import { Combobox } from "@/components/Combobox";
+import { FlowStepPicker } from "@/components/FlowStepPicker";
 
 type Stage = "pouch" | "stretching" | "pichiru" | "packing";
 
@@ -64,6 +66,8 @@ export function StageForm({ stage }: { stage: Stage }) {
   const { data: employees } = useEmployees(true);
   const { data: lots } = useActiveCuttingLots();
   const { data: types } = useStretchingTypes(true);
+  // All flows (not just active): a lot keeps its flow even after deactivation.
+  const { data: flows } = useStretchingFlows();
   const invalidate = useInvalidateEntries();
 
   const [cuttingLotId, setCuttingLotId] = useState("");
@@ -97,6 +101,12 @@ export function StageForm({ stage }: { stage: Stage }) {
       : undefined;
     return hit?.pricePerDozen ?? ty.amountPerDozen;
   };
+  // A lot created with a stretching flow lists ONLY the flow's steps, in order.
+  const lotFlow =
+    needsType && selectedLot?.stretchingFlowId
+      ? flows?.find((f) => f.id === selectedLot.stretchingFlowId)
+      : undefined;
+
   const reqQty = Number(dozen || 0) + Number(pieces || 0) / 12;
   const canSave =
     !!lotId &&
@@ -154,20 +164,20 @@ export function StageForm({ stage }: { stage: Stage }) {
       <CardContent>
         <form onSubmit={submit} className="space-y-4">
           <Field label={t("cuttingLot.number")}>
-            <Select
+            <Combobox
               value={cuttingLotId}
-              onChange={(e) => {
-                setCuttingLotId(e.target.value);
+              onChange={(v) => {
+                setCuttingLotId(v);
                 setSelectedColors([]);
+                // The old type may not be a step of the new lot's flow.
+                if (needsType) setStretchingTypeId("");
               }}
-            >
-              <option value="">{t("cuttingLot.select")}</option>
-              {visibleLots?.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.cuttingLotNumber} · {l.fabricationLot.lotNumber} · {l.category.name}/{l.size.name}
-                </option>
-              ))}
-            </Select>
+              placeholder={t("cuttingLot.select")}
+              options={(visibleLots ?? []).map((l) => ({
+                value: String(l.id),
+                label: `${l.cuttingLotNumber} · ${l.fabricationLot.lotNumber} · ${l.category.name}/${l.size.name}`,
+              }))}
+            />
           </Field>
 
           <Field label={t("common.color")} hint={lotId ? t("form.selectColors") : undefined}>
@@ -177,22 +187,34 @@ export function StageForm({ stage }: { stage: Stage }) {
               onChange={setSelectedColors}
               disabled={!lotId}
               emptyLabel={lotId ? t("form.noColors") : t("form.selectColor")}
+              selectAllLabel={t("form.allColors")}
             />
           </Field>
 
           {needsType && (
-            <Field label={t("nav.stretching")}>
-              <Select
-                value={stretchingTypeId}
-                onChange={(e) => setStretchingTypeId(e.target.value)}
-              >
-                <option value="">{t("form.selectType")}</option>
-                {types?.map((ty) => (
-                  <option key={ty.id} value={ty.id}>
-                    {ty.name} · {rateFor(ty)}
-                  </option>
-                ))}
-              </Select>
+            <Field label={lotFlow ? t("form.flowSteps") : t("nav.stretching")}>
+              {lotFlow ? (
+                <FlowStepPicker
+                  cuttingLotId={lotId}
+                  steps={lotFlow.steps.map((s) => ({
+                    typeId: s.stretchingTypeId,
+                    position: s.position,
+                    name: s.stretchingType.name,
+                  }))}
+                  value={stretchingTypeId}
+                  onChange={setStretchingTypeId}
+                />
+              ) : (
+                <Combobox
+                  value={stretchingTypeId}
+                  onChange={setStretchingTypeId}
+                  placeholder={t("form.selectType")}
+                  options={(types ?? []).map((ty) => ({
+                    value: String(ty.id),
+                    label: `${ty.name} · ${rateFor(ty)}`,
+                  }))}
+                />
+              )}
             </Field>
           )}
 
@@ -240,14 +262,15 @@ export function StageForm({ stage }: { stage: Stage }) {
           </div>
 
           <Field label={t("common.employee")}>
-            <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-              <option value="">{t("form.selectEmployee")}</option>
-              {employees?.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name}
-                </option>
-              ))}
-            </Select>
+            <Combobox
+              value={employeeId}
+              onChange={setEmployeeId}
+              placeholder={t("form.selectEmployee")}
+              options={(employees ?? []).map((emp) => ({
+                value: String(emp.id),
+                label: emp.name,
+              }))}
+            />
           </Field>
 
           <Button type="submit" disabled={!canSave || saving} className="w-full">

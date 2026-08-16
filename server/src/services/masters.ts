@@ -125,10 +125,13 @@ export async function deleteColor(id: number) {
   return { deleted: true };
 }
 
-/** Delete a stretching type only if no stretching entry references it. */
+/** Delete a stretching type only if no stretching entry OR flow step references it. */
 export async function deleteStretchingType(id: number) {
-  const used = await prisma.stretchingEntry.count({ where: { stretchingTypeId: id } });
-  if (used > 0) throw new ApiException(ErrorCode.IN_USE, 400);
+  const [entries, flowSteps] = await Promise.all([
+    prisma.stretchingEntry.count({ where: { stretchingTypeId: id } }),
+    prisma.stretchingFlowStep.count({ where: { stretchingTypeId: id } }),
+  ]);
+  if (entries > 0 || flowSteps > 0) throw new ApiException(ErrorCode.IN_USE, 400);
   await prisma.stretchingType.delete({ where: { id } });
   return { deleted: true };
 }

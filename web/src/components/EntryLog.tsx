@@ -1,15 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Pencil, Trash2, Check, X } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, Input, Select } from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle, Input } from "@/components/ui";
+import { Combobox } from "@/components/Combobox";
 import { useStageEntries, useEmployees, type StageEntry } from "@/lib/data";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/notify";
 import { blockDecimal, clampPieces } from "@/lib/utils";
+import { Pagination } from "@/pages/_parts";
 
-/** Log of entries for a stage + cutting lot, with inline edit and delete. */
+const PAGE_SIZE = 20;
+
+/** Log of entries for a stage + cutting lot, with inline edit and delete.
+ *  Paginated, filterable to one employee. */
 export function EntryLog({
   stage,
   cuttingLotId,
@@ -20,14 +25,45 @@ export function EntryLog({
   onChanged?: () => void;
 }) {
   const { t } = useTranslation();
-  const { data: entries } = useStageEntries(stage, cuttingLotId);
+  const { data: employees } = useEmployees();
+  const [page, setPage] = useState(1);
+  const [employeeId, setEmployeeId] = useState("");
+  const { data: list } = useStageEntries(stage, cuttingLotId, {
+    page,
+    pageSize: PAGE_SIZE,
+    employeeId: employeeId ? Number(employeeId) : undefined,
+  });
+
+  // A different lot is a different log — filters from the old one don't apply.
+  useEffect(() => {
+    setPage(1);
+    setEmployeeId("");
+  }, [cuttingLotId]);
 
   if (!cuttingLotId) return null;
 
   return (
     <Card className="max-w-3xl">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
         <CardTitle className="text-base">{t("entryLog.title")}</CardTitle>
+        <div className="w-56">
+          <Combobox
+            className="h-8"
+            value={employeeId}
+            onChange={(v) => {
+              setEmployeeId(v);
+              setPage(1);
+            }}
+            placeholder={t("entryLog.allEmployees")}
+            options={[
+              { value: "", label: t("entryLog.allEmployees") },
+              ...(employees ?? []).map((emp) => ({
+                value: String(emp.id),
+                label: emp.name,
+              })),
+            ]}
+          />
+        </div>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
@@ -46,10 +82,10 @@ export function EntryLog({
               </tr>
             </thead>
             <tbody>
-              {entries?.map((e) => (
+              {list?.items.map((e) => (
                 <EntryRow key={e.id} stage={stage} entry={e} onChanged={onChanged} />
               ))}
-              {entries && !entries.length && (
+              {list && !list.items.length && (
                 <tr>
                   <td colSpan={stage === "stretching" ? 7 : 6} className="py-3 text-muted-foreground">
                     {t("entryLog.empty")}
@@ -59,6 +95,9 @@ export function EntryLog({
             </tbody>
           </table>
         </div>
+        {list && list.total > 0 && (
+          <Pagination page={list.page} pageSize={list.pageSize} total={list.total} onPage={setPage} />
+        )}
       </CardContent>
     </Card>
   );
@@ -124,12 +163,16 @@ function EntryRow({
         {stage === "stretching" && <td className="py-2">{entry.stretchingType?.name}</td>}
         <td className="py-2"><Input type="number" step="1" min="0" onKeyDown={blockDecimal} className="h-8 w-16" value={form.dozen} onChange={(e) => setForm({ ...form, dozen: e.target.value })} /></td>
         <td className="py-2"><Input type="number" step="1" min="0" max="11" onKeyDown={blockDecimal} className="h-8 w-16" value={form.pieces} onChange={(e) => setForm({ ...form, pieces: clampPieces(e.target.value) })} /></td>
-        <td className="py-2">
-          <Select className="h-8" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
-            {employees?.map((emp) => (
-              <option key={emp.id} value={emp.id}>{emp.name}</option>
-            ))}
-          </Select>
+        <td className="py-2 min-w-[10rem]">
+          <Combobox
+            className="h-8"
+            value={form.employeeId}
+            onChange={(v) => setForm({ ...form, employeeId: v })}
+            options={(employees ?? []).map((emp) => ({
+              value: String(emp.id),
+              label: emp.name,
+            }))}
+          />
         </td>
         <td className="py-2">
           <div className="flex gap-1 justify-end">

@@ -9,6 +9,8 @@ import type {
   WeekAnalytics,
   QuotaInfo,
   LotColorQuota,
+  FlowColorStatus,
+  FabricationAnalytics,
   WeekSalarySheet,
   RipInfo,
   FabricationType,
@@ -102,6 +104,21 @@ export interface StretchingType {
   active: boolean;
   slabs: StretchingSlab[];
 }
+export interface StretchingFlowStep {
+  id: number;
+  flowId: number;
+  position: number;
+  stretchingTypeId: number;
+  stretchingType: { id: number; name: string; amountPerDozen: number };
+}
+export interface StretchingFlow {
+  id: number;
+  name: string;
+  skipKainool: boolean;
+  active: boolean;
+  steps: StretchingFlowStep[];
+  _count?: { cuttingLots: number };
+}
 export interface CuttingLotRef {
   id: number;
   cuttingLotNumber: string;
@@ -113,6 +130,9 @@ export interface CuttingLotRef {
   category: { id: number; name: string };
   size: { id: number; name: string };
   fabricationLot: { id: number; lotNumber: string; locked: boolean; status: string; type: FabricationType };
+  /** Null on legacy and short-flow lots. Steps come from useStretchingFlows (join by id). */
+  stretchingFlowId: number | null;
+  stretchingFlow: { id: number; name: string; skipKainool: boolean } | null;
   createdAt: string;
 }
 export interface CuttingLotLite {
@@ -150,6 +170,26 @@ export const useStretchingTypes = (activeOnly = false) =>
       api.get<StretchingType[]>(
         `/api/stretching-types${activeOnly ? "?active=1" : ""}`
       ),
+  });
+
+export const useStretchingFlows = (activeOnly = false) =>
+  useQuery({
+    queryKey: ["stretchingFlows", activeOnly],
+    queryFn: () =>
+      api.get<StretchingFlow[]>(
+        `/api/stretching-flows${activeOnly ? "?active=1" : ""}`
+      ),
+  });
+
+/** Per-colour, per-step standing of a flow lot — feeds the ordered step picker. */
+export const useLotFlowStatus = (cuttingLotId?: number) =>
+  useQuery({
+    queryKey: ["lotFlowStatus", cuttingLotId],
+    queryFn: () =>
+      api.get<FlowColorStatus[]>(
+        `/api/stretching-flows/status?cuttingLotId=${cuttingLotId}`
+      ),
+    enabled: !!cuttingLotId,
   });
 
 export const useCategories = (activeOnly = false) =>
@@ -402,6 +442,15 @@ export const useCuttingLotAnalytics = (cuttingLotId: number | undefined) =>
     enabled: !!cuttingLotId,
   });
 
+/** Fabrication drill-down: the lot, its rolls, per-cutting-lot cut/packed rollups. */
+export const useFabricationAnalytics = (fabricationLotId: number | undefined) =>
+  useQuery({
+    queryKey: ["fabricationAnalytics", fabricationLotId],
+    queryFn: () =>
+      api.get<FabricationAnalytics>(`/api/analytics/fabrication-lot/${fabricationLotId}`),
+    enabled: !!fabricationLotId,
+  });
+
 export interface StageEntry {
   id: number;
   cuttingLotId: number;
@@ -416,12 +465,18 @@ export interface StageEntry {
 
 export const useStageEntries = (
   stage: string,
-  cuttingLotId: number | undefined
+  cuttingLotId: number | undefined,
+  opts?: { page?: number; pageSize?: number; employeeId?: number }
 ) =>
   useQuery({
-    queryKey: ["stageEntries", stage, cuttingLotId],
-    queryFn: () =>
-      api.get<StageEntry[]>(`/api/${stage}?cuttingLotId=${cuttingLotId}`),
+    queryKey: ["stageEntries", stage, cuttingLotId, opts?.page ?? 1, opts?.employeeId],
+    queryFn: () => {
+      const q = new URLSearchParams({ cuttingLotId: String(cuttingLotId) });
+      q.set("page", String(opts?.page ?? 1));
+      if (opts?.pageSize) q.set("pageSize", String(opts.pageSize));
+      if (opts?.employeeId) q.set("employeeId", String(opts.employeeId));
+      return api.get<Paginated<StageEntry>>(`/api/${stage}?${q.toString()}`);
+    },
     enabled: !!cuttingLotId,
   });
 
@@ -484,8 +539,10 @@ export function useInvalidateEntries() {
     // Saving at one stage moves the next stage's ceiling too, so the whole-lot
     // remaining view has to be refetched, not just the row that was edited.
     qc.invalidateQueries({ queryKey: ["lotColorQuotas"] });
+    qc.invalidateQueries({ queryKey: ["lotFlowStatus"] });
     qc.invalidateQueries({ queryKey: ["stageEntries"] });
     qc.invalidateQueries({ queryKey: ["analytics"] });
+    qc.invalidateQueries({ queryKey: ["fabricationAnalytics"] });
     qc.invalidateQueries({ queryKey: ["salary"] });
   };
 }

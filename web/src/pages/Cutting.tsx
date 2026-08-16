@@ -9,10 +9,10 @@ import {
   CardTitle,
   Field,
   Input,
-  Select,
   Button,
   MultiSelectChips,
 } from "@/components/ui";
+import { Combobox } from "@/components/Combobox";
 import {
   useEmployees,
   useActiveCuttingLots,
@@ -92,17 +92,15 @@ export default function CuttingPage() {
         <CardContent>
           <form onSubmit={submit} className="space-y-4">
             <Field label={t("cuttingLot.number")}>
-              <Select
+              <Combobox
                 value={cuttingLotId}
-                onChange={(e) => setCuttingLotId(e.target.value)}
-              >
-                <option value="">{t("cuttingLot.select")}</option>
-                {lots?.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.cuttingLotNumber} · {l.fabricationLot.lotNumber} · {l.category.name}/{l.size.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={setCuttingLotId}
+                placeholder={t("cuttingLot.select")}
+                options={(lots ?? []).map((l) => ({
+                  value: String(l.id),
+                  label: `${l.cuttingLotNumber} · ${l.fabricationLot.lotNumber} · ${l.category.name}/${l.size.name}`,
+                }))}
+              />
             </Field>
 
             <Field label={t("common.color")} hint={t("form.selectColors")}>
@@ -111,6 +109,7 @@ export default function CuttingPage() {
                 selected={selectedColors}
                 onChange={setSelectedColors}
                 emptyLabel={t("form.noColors")}
+                selectAllLabel={t("form.allColors")}
               />
             </Field>
 
@@ -144,14 +143,15 @@ export default function CuttingPage() {
             </div>
 
             <Field label={t("common.employee")}>
-              <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-                <option value="">{t("form.selectEmployee")}</option>
-                {employees?.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name}
-                  </option>
-                ))}
-              </Select>
+              <Combobox
+                value={employeeId}
+                onChange={setEmployeeId}
+                placeholder={t("form.selectEmployee")}
+                options={(employees ?? []).map((emp) => ({
+                  value: String(emp.id),
+                  label: emp.name,
+                }))}
+              />
             </Field>
 
             <Button type="submit" disabled={!canSave || saving} className="w-full">

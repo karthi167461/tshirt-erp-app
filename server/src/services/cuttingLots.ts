@@ -2,12 +2,20 @@ import { ErrorCode, type CuttingLotInput } from "@erp/shared";
 import { prisma } from "../db.js";
 import { ApiException } from "../errors.js";
 import { paginate } from "./pagination.js";
+import { isShortFlow } from "./entries.js";
 
 const includeRefs = {
   category: true,
   size: true,
   fabricationLot: { select: { id: true, lotNumber: true, locked: true, status: true, type: true } },
+  stretchingFlow: { select: { id: true, name: true, skipKainool: true } },
 } as const;
+
+async function assertStretchingFlow(id: number, requireActive: boolean) {
+  const flow = await prisma.stretchingFlow.findUnique({ where: { id } });
+  if (!flow || (requireActive && !flow.active))
+    throw new ApiException(ErrorCode.STRETCHING_FLOW_NOT_FOUND, 404);
+}
 
 /** Create a cutting lot against a READY, unlocked fabrication lot. */
 export async function createCuttingLot(input: CuttingLotInput) {
@@ -17,6 +25,14 @@ export async function createCuttingLot(input: CuttingLotInput) {
   if (!fab) throw new ApiException(ErrorCode.FABRICATION_LOT_NOT_FOUND, 404);
   if (fab.status !== "ready") throw new ApiException(ErrorCode.FABRICATION_NOT_READY, 400);
   if (fab.locked) throw new ApiException(ErrorCode.LOT_LOCKED, 400);
+
+  // Every new full-flow lot must carry a stretching flow; short-flow
+  // (job-given-out) lots never stretch, so they are exempt and stay null.
+  const shortFlow = isShortFlow(fab.type);
+  if (!shortFlow && !input.stretchingFlowId)
+    throw new ApiException(ErrorCode.FLOW_REQUIRED, 400);
+  const stretchingFlowId = shortFlow ? null : input.stretchingFlowId!;
+  if (stretchingFlowId) await assertStretchingFlow(stretchingFlowId, true);
 
   const category = await prisma.category.findUnique({ where: { id: input.categoryId } });
   if (!category) throw new ApiException(ErrorCode.CATEGORY_NOT_FOUND, 404);
@@ -32,6 +48,7 @@ export async function createCuttingLot(input: CuttingLotInput) {
         dia: input.dia,
         categoryId: input.categoryId,
         sizeId: input.sizeId,
+        stretchingFlowId,
       },
       include: includeRefs,
     });
@@ -103,6 +120,9 @@ export async function updateCuttingLot(
     if (!size || size.categoryId !== categoryId)
       throw new ApiException(ErrorCode.SIZE_NOT_FOUND, 404);
   }
+  // Reassigning the flow on a lot with entries is allowed — quota is enforced at
+  // write time only, so the chain semantics simply change for FUTURE entries.
+  if (input.stretchingFlowId) await assertStretchingFlow(input.stretchingFlowId, false);
   return prisma.cuttingLot.update({ where: { id }, data: input, include: includeRefs });
 }
 

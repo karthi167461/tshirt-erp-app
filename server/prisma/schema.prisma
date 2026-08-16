@@ -96,8 +96,39 @@ model StretchingType {
   amountPerDozen Float
   active         Boolean @default(true)
 
-  entries StretchingEntry[]
-  slabs   StretchingPriceSlab[]
+  entries   StretchingEntry[]
+  slabs     StretchingPriceSlab[]
+  flowSteps StretchingFlowStep[]
+}
+
+// An ordered sequence of stretching types a lot must pass through. Step i can
+// only process what step i-1 has finished (step 1 is bounded by pouch). Lots
+// created before flows existed have stretchingFlowId = null and keep the old
+// behavior: any type, each independently bounded by pouch.
+model StretchingFlow {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  // true: after the last stretching step the lot skips kainool (pichiru) and
+  // packs directly against completed stretching.
+  skipKainool Boolean  @default(false)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  steps       StretchingFlowStep[]
+  cuttingLots CuttingLot[]
+}
+
+model StretchingFlowStep {
+  id               Int            @id @default(autoincrement())
+  flow             StretchingFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  flowId           Int
+  position         Int // 1-based order within the flow
+  stretchingType   StretchingType @relation(fields: [stretchingTypeId], references: [id])
+  stretchingTypeId Int
+
+  @@unique([flowId, position])
+  @@unique([flowId, stretchingTypeId])
+  @@index([stretchingTypeId])
 }
 
 // Size-range price slabs for a stretching type. A lot's numeric size falling in
@@ -308,6 +339,10 @@ model CuttingLot {
   categoryId       Int
   size             Size           @relation(fields: [sizeId], references: [id])
   sizeId           Int
+  // Required for new full-flow lots (service-enforced); null on lots created
+  // before flows existed and on short-flow (job_given_out) lots.
+  stretchingFlow   StretchingFlow? @relation(fields: [stretchingFlowId], references: [id])
+  stretchingFlowId Int?
   status           String         @default("active") // active | completed
   createdAt        DateTime       @default(now())
 
@@ -319,6 +354,7 @@ model CuttingLot {
 
   @@index([fabricationLotId])
   @@index([status])
+  @@index([stretchingFlowId])
 }
 
 /* ------------------------------------------------------------------ *
