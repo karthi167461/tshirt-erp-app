@@ -65,23 +65,26 @@ export function Combobox({
     );
   }, [options, filter]);
 
+  function reposition() {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    // Open upward when the space below can't fit the popup but above can.
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const flip = spaceBelow < 300 && rect.top > spaceBelow;
+    setPos(
+      flip
+        ? { bottom: window.innerHeight - rect.top + 4, left: rect.left, width: rect.width }
+        : { top: rect.bottom + 4, left: rect.left, width: rect.width }
+    );
+  }
+
   function openPopup() {
     if (disabled) return;
     setFilter("");
     // Start the highlight on the current selection so Enter twice is a no-op.
     const i = options.findIndex((o) => o.value === value);
     setHighlight(Math.max(0, i));
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) {
-      // Open upward when the space below can't fit the popup but above can.
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const flip = spaceBelow < 300 && rect.top > spaceBelow;
-      setPos(
-        flip
-          ? { bottom: window.innerHeight - rect.top + 4, left: rect.left, width: rect.width }
-          : { top: rect.bottom + 4, left: rect.left, width: rect.width }
-      );
-    }
+    reposition();
     setOpen(true);
   }
 
@@ -95,9 +98,12 @@ export function Combobox({
     close(true);
   }
 
-  // Close on any pointerdown outside the component, and on outside scroll or a
-  // resize — the popup is position:fixed, so it would otherwise drift away from
-  // its trigger instead of following it.
+  // Close on any pointerdown outside the component. Outside scrolls and window
+  // resizes REPOSITION rather than close: on mobile the soft keyboard raised by
+  // the autofocused filter input fires exactly those events the moment the
+  // popup opens (viewport resize + scroll-into-view), and closing on them made
+  // the picker unusable on phones. The popup is position:fixed, so it follows
+  // the trigger by recomputing from its rect.
   React.useEffect(() => {
     if (!open) return;
     function onPointerDown(e: PointerEvent) {
@@ -107,10 +113,10 @@ export function Combobox({
     }
     function onScroll(e: Event) {
       if (e.target instanceof Node && wrapRef.current?.contains(e.target)) return;
-      setOpen(false);
+      reposition();
     }
     function onResize() {
-      setOpen(false);
+      reposition();
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("scroll", onScroll, true);
@@ -194,6 +200,14 @@ export function Combobox({
           data-combobox-popup
           style={{ top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width }}
           className="fixed z-50 rounded-md border border-border bg-card shadow-lg"
+          // On touch, a tap first BLURS the filter input; the wrapper's onBlur
+          // would close the popup before the tap's click reaches the option
+          // (mobile relatedTarget is null). Keeping pointer-down from moving
+          // focus lets the click land. Taps on the input itself must still
+          // focus it, and scrolling is unaffected (that's touchmove).
+          onPointerDown={(e) => {
+            if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+          }}
         >
           <div className="p-2 border-b border-border">
             <input
